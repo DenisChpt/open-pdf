@@ -1,40 +1,58 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted, onUnmounted } from "vue";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
-defineProps<{
+const props = defineProps<{
   label?: string;
-  accept?: string;
+  accept?: string[];
 }>();
 
 const emit = defineEmits<{
   select: [];
+  drop: [paths: string[]];
 }>();
 
 const isDragging = ref(false);
+let unlisten: (() => void) | null = null;
 
-function onDragEnter(event: DragEvent) {
-  event.preventDefault();
-  isDragging.value = true;
-}
+onMounted(async () => {
+  const webview = getCurrentWebviewWindow();
+  unlisten = await webview.onDragDropEvent((event) => {
+    if (event.payload.type === "over") {
+      isDragging.value = true;
+    } else if (event.payload.type === "drop") {
+      isDragging.value = false;
+      const paths = filterByExtension(event.payload.paths);
+      if (paths.length > 0) {
+        emit("drop", paths);
+      }
+    } else {
+      // cancelled
+      isDragging.value = false;
+    }
+  });
+});
 
-function onDragLeave(event: DragEvent) {
-  event.preventDefault();
-  const target = event.currentTarget as HTMLElement;
-  const related = event.relatedTarget as Node | null;
-  if (target && !target.contains(related)) {
-    isDragging.value = false;
-  }
+onUnmounted(() => {
+  unlisten?.();
+});
+
+function filterByExtension(paths: string[]): string[] {
+  const allowed = props.accept ?? ["pdf"];
+  return paths.filter((p) => {
+    const ext = p.split(".").pop()?.toLowerCase() ?? "";
+    return allowed.includes(ext);
+  });
 }
 
 function onDragOver(event: DragEvent) {
   event.preventDefault();
 }
 
-function onDrop(event: DragEvent) {
+function onWebDrop(event: DragEvent) {
   event.preventDefault();
   isDragging.value = false;
-  // Tauri handles file paths via dialog, drop is visual feedback only
-  emit("select");
+  // Tauri's onDragDropEvent handles the actual paths
 }
 </script>
 
@@ -42,10 +60,8 @@ function onDrop(event: DragEvent) {
   <div
     class="drop-zone"
     :class="{ 'drop-zone--active': isDragging }"
-    @dragenter="onDragEnter"
-    @dragleave="onDragLeave"
     @dragover="onDragOver"
-    @drop="onDrop"
+    @drop="onWebDrop"
     @click="emit('select')"
   >
     <div class="drop-zone-content">

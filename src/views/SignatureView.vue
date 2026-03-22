@@ -26,6 +26,7 @@ const items = ref<SignatureItem[]>([]);
 // --- Palette state ---
 const firstName = ref("");
 const lastName = ref("");
+const lieu = ref("");
 const initialsOverride = ref("");
 const dateFormat = ref("DD/MM/YYYY");
 const drawingDataUrl = ref<string | null>(null);
@@ -76,11 +77,10 @@ function makeId(): string {
 }
 
 // --- File selection ---
-async function selectFile() {
+async function loadPaths(paths: string[]) {
+  if (paths.length === 0) return;
   statusMessage.value = null;
   try {
-    const paths = await pickPdfFiles();
-    if (paths.length === 0) return;
     const info = await getPdfInfo(paths[0]);
     file.value = {
       path: info.path, name: info.file_name,
@@ -91,10 +91,15 @@ async function selectFile() {
     thumbnails.value = [];
 
     const base64 = await getPdfData(paths[0]);
-    thumbnails.value = await renderThumbnails(base64, info.page_count);
+    thumbnails.value = await renderThumbnails(base64, info.page_count, 2);
   } catch (error) {
     statusMessage.value = { type: "error", message: `${error}` };
   }
+}
+
+async function selectFile() {
+  const paths = await pickPdfFiles();
+  await loadPaths(paths);
 }
 
 // --- Add elements ---
@@ -124,6 +129,7 @@ function addImageItem(type: SignatureItem["type"], dataUrl: string | null) {
 
 function addName() { addTextItem("name", `${firstName.value} ${lastName.value}`.trim(), 14, 0.25, 0.03); }
 function addInitials() { addTextItem("initials", initials.value, 14, 0.06, 0.03); }
+function addLieu() { addTextItem("lieu", lieu.value.trim(), 12, 0.2, 0.025); }
 function addDate() { addTextItem("date", formattedDate.value, 11, 0.18, 0.025); }
 function addDrawing() { addImageItem("drawing", drawingDataUrl.value); }
 function addPhoto() { addImageItem("photo", photoDataUrl.value); }
@@ -154,6 +160,8 @@ function uploadImage(target: "photo" | "stamp") {
 
 // --- Drag on preview ---
 function onItemPointerDown(e: PointerEvent, item: SignatureItem) {
+  // Don't start drag if clicking the delete button
+  if ((e.target as HTMLElement).closest(".sig-delete")) return;
   e.preventDefault();
   const preview = previewRef.value;
   if (!preview) return;
@@ -277,7 +285,7 @@ watch(lastName, () => { initialsOverride.value = ""; });
       </p>
     </div>
 
-    <DropZone v-if="!file" label="Cliquez pour choisir un fichier PDF" @select="selectFile" />
+    <DropZone v-if="!file" label="Cliquez pour choisir un fichier PDF" @select="selectFile" @drop="loadPaths" />
 
     <template v-else>
       <div class="sign-layout">
@@ -286,10 +294,8 @@ watch(lastName, () => { initialsOverride.value = ""; });
           <!-- Name -->
           <section class="palette-section">
             <h3 class="palette-title">Nom et Prenom</h3>
-            <div class="field-row">
-              <input v-model="firstName" placeholder="Prenom" class="palette-input" />
-              <input v-model="lastName" placeholder="Nom" class="palette-input" />
-            </div>
+            <input v-model="lastName" placeholder="Nom" class="palette-input" />
+            <input v-model="firstName" placeholder="Prenom" class="palette-input" />
             <button class="palette-add" :disabled="!firstName && !lastName" @click="addName">
               + Ajouter le nom
             </button>
@@ -338,6 +344,15 @@ watch(lastName, () => { initialsOverride.value = ""; });
             </div>
             <button class="palette-add" :disabled="!stampDataUrl" @click="addStamp">
               + Ajouter le tampon
+            </button>
+          </section>
+
+          <!-- Lieu -->
+          <section class="palette-section">
+            <h3 class="palette-title">Lieu</h3>
+            <input v-model="lieu" placeholder="Ville, Pays..." class="palette-input" />
+            <button class="palette-add" :disabled="!lieu.trim()" @click="addLieu">
+              + Ajouter le lieu
             </button>
           </section>
 
@@ -422,7 +437,7 @@ watch(lastName, () => { initialsOverride.value = ""; });
             >
               <!-- Text content -->
               <span
-                v-if="['name', 'initials', 'date'].includes(item.type)"
+                v-if="['name', 'initials', 'date', 'lieu'].includes(item.type)"
                 class="sig-text"
                 :style="{ fontSize: `${item.fontSize * 0.8}px` }"
               >{{ item.content }}</span>

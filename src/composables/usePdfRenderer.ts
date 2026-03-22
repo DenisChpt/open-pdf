@@ -6,7 +6,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url,
 ).toString();
 
-const THUMBNAIL_SCALE = 0.5;
+const DEFAULT_SCALE = 0.5;
 
 export function usePdfRenderer() {
   const isRendering = ref(false);
@@ -14,6 +14,7 @@ export function usePdfRenderer() {
   async function renderThumbnails(
     base64Data: string,
     pageCount: number,
+    scale: number = DEFAULT_SCALE,
   ): Promise<string[]> {
     isRendering.value = true;
 
@@ -29,7 +30,7 @@ export function usePdfRenderer() {
 
       for (let i = 1; i <= pageCount; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: THUMBNAIL_SCALE });
+        const viewport = page.getViewport({ scale });
 
         const canvas = document.createElement("canvas");
         canvas.width = viewport.width;

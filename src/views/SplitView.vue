@@ -126,12 +126,10 @@ const canSplit = computed(() => {
 
 // --- Actions ---
 
-async function selectFile() {
+async function loadPaths(paths: string[]) {
+  if (paths.length === 0) return;
   statusMessage.value = null;
   try {
-    const paths = await pickPdfFiles();
-    if (paths.length === 0) return;
-
     const info = await getPdfInfo(paths[0]);
     file.value = {
       path: info.path,
@@ -150,6 +148,11 @@ async function selectFile() {
   } catch (error) {
     statusMessage.value = { type: "error", message: `Erreur : ${error}` };
   }
+}
+
+async function selectFile() {
+  const paths = await pickPdfFiles();
+  await loadPaths(paths);
 }
 
 function addRange() {
@@ -294,7 +297,7 @@ function reset() {
       <p class="view-subtitle">Separarez votre PDF par intervalles, pages ou taille de fichier.</p>
     </div>
 
-    <DropZone v-if="!file" label="Cliquez pour choisir un fichier PDF" @select="selectFile" />
+    <DropZone v-if="!file" label="Cliquez pour choisir un fichier PDF" @select="selectFile" @drop="loadPaths" />
 
     <template v-else>
       <!-- File info bar -->

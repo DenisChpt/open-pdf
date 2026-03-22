@@ -28,14 +28,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} Mo`;
 }
 
-async function selectFile() {
+async function loadPaths(paths: string[]) {
+  if (paths.length === 0) return;
   errorMessage.value = null;
   result.value = null;
-
   try {
-    const paths = await pickPdfFiles();
-    if (paths.length === 0) return;
-
     const info = await getPdfInfo(paths[0]);
     file.value = {
       path: info.path,
@@ -46,6 +43,11 @@ async function selectFile() {
   } catch (error) {
     errorMessage.value = `Erreur lors de la lecture : ${error}`;
   }
+}
+
+async function selectFile() {
+  const paths = await pickPdfFiles();
+  await loadPaths(paths);
 }
 
 async function compress() {
@@ -97,6 +99,7 @@ function reset() {
       v-if="!file"
       label="Cliquez pour choisir un fichier PDF"
       @select="selectFile"
+      @drop="loadPaths"
     />
 
     <template v-else>

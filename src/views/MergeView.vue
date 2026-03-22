@@ -34,13 +34,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
 }
 
-async function addFiles() {
-  if (isAdding.value) return;
+async function loadPaths(paths: string[]) {
+  if (paths.length === 0) return;
   isAdding.value = true;
   statusMessage.value = null;
-
   try {
-    const paths = await pickPdfFiles();
     for (const path of paths) {
       if (files.value.some((f) => f.path === path)) continue;
 
@@ -66,6 +64,12 @@ async function addFiles() {
   } finally {
     isAdding.value = false;
   }
+}
+
+async function addFiles() {
+  if (isAdding.value) return;
+  const paths = await pickPdfFiles();
+  await loadPaths(paths);
 }
 
 async function loadThumbnail(item: MergeFileItem) {
@@ -134,6 +138,7 @@ async function merge() {
       v-if="files.length === 0"
       label="Cliquez pour choisir vos fichiers PDF"
       @select="addFiles"
+      @drop="loadPaths"
     />
 
     <template v-else>

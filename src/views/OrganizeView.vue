@@ -55,13 +55,10 @@ const hasChanges = computed(() => {
   return orderChanged || rotationChanged;
 });
 
-async function selectFile() {
+async function loadPaths(paths: string[]) {
+  if (paths.length === 0) return;
   statusMessage.value = null;
-
   try {
-    const paths = await pickPdfFiles();
-    if (paths.length === 0) return;
-
     const info = await getPdfInfo(paths[0]);
     file.value = {
       path: info.path,
@@ -90,6 +87,11 @@ async function selectFile() {
       message: `Erreur lors de la lecture : ${error}`,
     };
   }
+}
+
+async function selectFile() {
+  const paths = await pickPdfFiles();
+  await loadPaths(paths);
 }
 
 function removePage(index: number) {
@@ -166,6 +168,7 @@ function reset() {
       v-if="!file"
       label="Cliquez pour choisir un fichier PDF"
       @select="selectFile"
+      @drop="loadPaths"
     />
 
     <template v-else>
