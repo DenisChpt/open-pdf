@@ -13,8 +13,8 @@ use domain::ports::{FileSystemPort, PdfProcessor};
 use infrastructure::fs::LocalFileSystem;
 use infrastructure::pdf::LopdfAdapter;
 use interfaces::tauri_commands::{
-    compress_pdf, get_pdf_data, get_pdf_info, merge_pdfs, reorder_pages, save_file_base64,
-    sign_pdf, split_by_size, split_pdf, AppState,
+    compress_pdf, delete_file, get_pdf_data, get_pdf_info, merge_pdfs, reorder_pages,
+    save_file_base64, sign_pdf, split_by_size, split_pdf, AppState,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +38,7 @@ pub fn run() {
         ),
         sign_pdf: SignPdfUseCase::new(Arc::clone(&pdf_processor), Arc::clone(&file_system)),
         save_file: SaveFileUseCase::new(Arc::clone(&file_system)),
+        file_system: Arc::clone(&file_system),
     });
 
     tauri::Builder::default()
@@ -54,6 +55,7 @@ pub fn run() {
             reorder_pages,
             sign_pdf,
             save_file_base64,
+            delete_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

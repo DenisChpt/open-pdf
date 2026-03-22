@@ -13,6 +13,7 @@ use crate::application::use_cases::{
 };
 use crate::domain::entities::{OverlayContent, OverlayElement};
 use crate::domain::errors::DomainError;
+use crate::domain::ports::FileSystemPort;
 
 /// Shared application state holding the use cases, injected via Tauri's managed state.
 pub struct AppState {
@@ -25,6 +26,7 @@ pub struct AppState {
     pub reorder_pages: ReorderPagesUseCase,
     pub sign_pdf: SignPdfUseCase,
     pub save_file: SaveFileUseCase,
+    pub file_system: Arc<dyn FileSystemPort>,
 }
 
 // -- PDF Info --
@@ -349,4 +351,19 @@ pub async fn save_file_base64(
     .map_err(|e| DomainError::ProcessingError {
         reason: format!("Task join error: {}", e),
     })?
+}
+
+// -- Delete file --
+
+#[tauri::command]
+pub async fn delete_file(
+    state: State<'_, Arc<AppState>>,
+    path: PathBuf,
+) -> Result<(), DomainError> {
+    let state = Arc::clone(&state);
+    tokio::task::spawn_blocking(move || state.file_system.delete_file(&path))
+        .await
+        .map_err(|e| DomainError::ProcessingError {
+            reason: format!("Task join error: {}", e),
+        })?
 }

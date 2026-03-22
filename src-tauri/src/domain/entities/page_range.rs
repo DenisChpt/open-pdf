@@ -31,8 +31,4 @@ impl PageRange {
         Ok(Self { start, end })
     }
 
-    #[allow(dead_code)]
-    pub fn page_count(&self) -> u32 {
-        self.end - self.start + 1
-    }
 }

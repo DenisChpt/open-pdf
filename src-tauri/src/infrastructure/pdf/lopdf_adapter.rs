@@ -20,6 +20,7 @@ impl LopdfAdapter {
         })
     }
 
+
     fn save_document(doc: &mut Document) -> Result<Vec<u8>, DomainError> {
         let mut buf = Vec::new();
         doc.save_to(&mut buf).map_err(|e| DomainError::ProcessingError {

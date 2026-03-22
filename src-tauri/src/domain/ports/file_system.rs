@@ -12,4 +12,7 @@ pub trait FileSystemPort: Send + Sync {
 
     /// Returns the file size in bytes.
     fn file_size(&self, path: &Path) -> Result<u64, DomainError>;
+
+    /// Deletes a file if it exists. No error if the file is already absent.
+    fn delete_file(&self, path: &Path) -> Result<(), DomainError>;
 }
