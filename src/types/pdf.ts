@@ -65,6 +65,7 @@ export type SignatureItemType =
   | "drawing"
   | "photo"
   | "stamp"
+  | "lieu"
   | "date";
 
 export interface SignatureItem {

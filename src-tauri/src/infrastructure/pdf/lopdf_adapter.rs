@@ -283,10 +283,11 @@ impl PdfProcessor for LopdfAdapter {
             total: pages.len() as u32,
         })?;
 
-        // Determine page dimensions from MediaBox
         let (page_w, page_h) = Self::get_page_dimensions(&doc, page_id)?;
 
-        // Phase 1: create all new objects (font, images, content stream)
+        // ── Phase 1: build all overlay objects ──
+
+        // Font for text elements
         let font_id = doc.add_object(Object::Dictionary(dictionary! {
             "Type" => "Font",
             "Subtype" => "Type1",
@@ -294,8 +295,8 @@ impl PdfProcessor for LopdfAdapter {
             "Encoding" => "WinAnsiEncoding",
         }));
 
-        let mut content_ops = String::new();
-        let mut image_refs: Vec<(String, ObjectId)> = Vec::new();
+        let mut form_ops = String::new();
+        let mut xobject_dict = lopdf::Dictionary::new();
 
         for (i, element) in elements.iter().enumerate() {
             let x = element.x_ratio * page_w;
@@ -306,7 +307,7 @@ impl PdfProcessor for LopdfAdapter {
             match &element.content {
                 OverlayContent::Text { text, font_size } => {
                     let baseline_y = y + h * 0.25;
-                    content_ops.push_str(&format!(
+                    form_ops.push_str(&format!(
                         "q BT /SigFont {} Tf {} {} Td ({}) Tj ET Q\n",
                         font_size, x, baseline_y,
                         Self::escape_pdf_string(text),
@@ -320,43 +321,32 @@ impl PdfProcessor for LopdfAdapter {
                     })?;
                     let (img_w, img_h) = img.dimensions();
 
-                    // Handle alpha channel for transparency
                     let has_alpha = img.color().has_alpha();
                     let img_stream_id = if has_alpha {
                         let rgba = img.to_rgba8();
-                        let mut rgb_data =
-                            Vec::with_capacity((img_w * img_h * 3) as usize);
-                        let mut alpha_data =
-                            Vec::with_capacity((img_w * img_h) as usize);
+                        let mut rgb_data = Vec::with_capacity((img_w * img_h * 3) as usize);
+                        let mut alpha_data = Vec::with_capacity((img_w * img_h) as usize);
                         for pixel in rgba.pixels() {
                             rgb_data.extend_from_slice(&pixel.0[0..3]);
                             alpha_data.push(pixel.0[3]);
                         }
 
-                        // Soft mask for transparency
                         let mut mask_stream = Stream::new(
                             dictionary! {
-                                "Type" => "XObject",
-                                "Subtype" => "Image",
-                                "Width" => img_w as i64,
-                                "Height" => img_h as i64,
-                                "ColorSpace" => "DeviceGray",
-                                "BitsPerComponent" => 8_i64,
+                                "Type" => "XObject", "Subtype" => "Image",
+                                "Width" => img_w as i64, "Height" => img_h as i64,
+                                "ColorSpace" => "DeviceGray", "BitsPerComponent" => 8_i64,
                             },
                             alpha_data,
                         );
                         let _ = mask_stream.compress();
-                        let mask_id =
-                            doc.add_object(Object::Stream(mask_stream));
+                        let mask_id = doc.add_object(Object::Stream(mask_stream));
 
                         let mut img_s = Stream::new(
                             dictionary! {
-                                "Type" => "XObject",
-                                "Subtype" => "Image",
-                                "Width" => img_w as i64,
-                                "Height" => img_h as i64,
-                                "ColorSpace" => "DeviceRGB",
-                                "BitsPerComponent" => 8_i64,
+                                "Type" => "XObject", "Subtype" => "Image",
+                                "Width" => img_w as i64, "Height" => img_h as i64,
+                                "ColorSpace" => "DeviceRGB", "BitsPerComponent" => 8_i64,
                                 "SMask" => Object::Reference(mask_id),
                             },
                             rgb_data,
@@ -365,26 +355,22 @@ impl PdfProcessor for LopdfAdapter {
                         doc.add_object(Object::Stream(img_s))
                     } else {
                         let rgb = img.to_rgb8();
-                        let pixels = rgb.into_raw();
                         let mut img_s = Stream::new(
                             dictionary! {
-                                "Type" => "XObject",
-                                "Subtype" => "Image",
-                                "Width" => img_w as i64,
-                                "Height" => img_h as i64,
-                                "ColorSpace" => "DeviceRGB",
-                                "BitsPerComponent" => 8_i64,
+                                "Type" => "XObject", "Subtype" => "Image",
+                                "Width" => img_w as i64, "Height" => img_h as i64,
+                                "ColorSpace" => "DeviceRGB", "BitsPerComponent" => 8_i64,
                             },
-                            pixels,
+                            rgb.into_raw(),
                         );
                         let _ = img_s.compress();
                         doc.add_object(Object::Stream(img_s))
                     };
 
                     let name = format!("SigImg{}", i);
-                    image_refs.push((name.clone(), img_stream_id));
+                    xobject_dict.set(name.as_bytes(), Object::Reference(img_stream_id));
 
-                    content_ops.push_str(&format!(
+                    form_ops.push_str(&format!(
                         "q {} 0 0 {} {} {} cm /{} Do Q\n",
                         w, h, x, y, name,
                     ));
@@ -392,54 +378,51 @@ impl PdfProcessor for LopdfAdapter {
             }
         }
 
-        // Create new content stream
-        let content_stream = Stream::new(dictionary! {}, content_ops.into_bytes());
-        let content_id = doc.add_object(Object::Stream(content_stream));
+        // ── Phase 2: create a self-contained Form XObject ──
+        // A Form XObject carries its own Resources, so we never need to modify
+        // the page's (potentially deeply-nested indirect) Resources at all.
 
-        // Phase 2: update page dictionary (add resources + content)
+        let mut form_resources = lopdf::Dictionary::new();
+        let mut font_dict = lopdf::Dictionary::new();
+        font_dict.set("SigFont", Object::Reference(font_id));
+        form_resources.set("Font", Object::Dictionary(font_dict));
+        if !xobject_dict.is_empty() {
+            form_resources.set("XObject", Object::Dictionary(xobject_dict));
+        }
+
+        let form_stream = Stream::new(
+            dictionary! {
+                "Type" => "XObject",
+                "Subtype" => "Form",
+                "BBox" => vec![
+                    Object::Integer(0), Object::Integer(0),
+                    Object::Real(page_w), Object::Real(page_h),
+                ],
+                "Resources" => Object::Dictionary(form_resources),
+            },
+            form_ops.into_bytes(),
+        );
+        let form_id = doc.add_object(Object::Stream(form_stream));
+
+        // ── Phase 3: add a tiny content stream that invokes the form ──
+        let invoke_ops = format!("q /SigOverlay Do Q\n");
+        let invoke_stream = Stream::new(dictionary! {}, invoke_ops.into_bytes());
+        let invoke_id = doc.add_object(Object::Stream(invoke_stream));
+
+        // ── Phase 4: register the form in the page's XObject resources ──
+        // We only add ONE entry (/SigOverlay) — much simpler than adding fonts+images.
+        Self::add_page_xobject(&mut doc, page_id, "SigOverlay", form_id)?;
+
+        // ── Phase 5: append invoke stream to page Contents ──
         if let Some(Object::Dictionary(page_dict)) = doc.objects.get_mut(&page_id) {
-            // Ensure Resources dict exists
-            if page_dict.get(b"Resources").is_err() {
-                page_dict.set("Resources", Object::Dictionary(lopdf::Dictionary::new()));
-            }
-
-            // Get or create Font sub-dict in Resources
-            if let Ok(Object::Dictionary(resources)) = page_dict.get_mut(b"Resources") {
-                // Add font
-                if resources.get(b"Font").is_err() {
-                    resources.set("Font", Object::Dictionary(lopdf::Dictionary::new()));
-                }
-                if let Ok(Object::Dictionary(fonts)) = resources.get_mut(b"Font") {
-                    fonts.set("SigFont", Object::Reference(font_id));
-                }
-
-                // Add image XObjects
-                if !image_refs.is_empty() {
-                    if resources.get(b"XObject").is_err() {
-                        resources.set(
-                            "XObject",
-                            Object::Dictionary(lopdf::Dictionary::new()),
-                        );
-                    }
-                    if let Ok(Object::Dictionary(xobjects)) =
-                        resources.get_mut(b"XObject")
-                    {
-                        for (name, obj_id) in &image_refs {
-                            xobjects.set(name.as_bytes(), Object::Reference(*obj_id));
-                        }
-                    }
-                }
-            }
-
-            // Append our content stream to the page's Contents
-            let existing_contents = page_dict.get(b"Contents").ok().cloned();
-            let mut contents_array = match existing_contents {
+            let existing = page_dict.get(b"Contents").ok().cloned();
+            let mut arr = match existing {
                 Some(Object::Reference(id)) => vec![Object::Reference(id)],
-                Some(Object::Array(arr)) => arr,
+                Some(Object::Array(a)) => a,
                 _ => vec![],
             };
-            contents_array.push(Object::Reference(content_id));
-            page_dict.set("Contents", Object::Array(contents_array));
+            arr.push(Object::Reference(invoke_id));
+            page_dict.set("Contents", Object::Array(arr));
         }
 
         Self::save_document(&mut doc)
@@ -481,5 +464,83 @@ impl LopdfAdapter {
         s.replace('\\', "\\\\")
             .replace('(', "\\(")
             .replace(')', "\\)")
+    }
+
+    /// Adds an XObject entry to a page's Resources, handling indirect references at every level.
+    fn add_page_xobject(
+        doc: &mut Document,
+        page_id: ObjectId,
+        name: &str,
+        xobject_id: ObjectId,
+    ) -> Result<(), DomainError> {
+        // Step 1: find the Resources object ID (or create inline)
+        let resources_ref = {
+            let page = doc.get_object(page_id)
+                .and_then(|o| o.as_dict().map_err(|e| e.into()))
+                .map_err(|_: lopdf::Error| DomainError::ProcessingError {
+                    reason: "Cannot read page".into(),
+                })?;
+            match page.get(b"Resources") {
+                Ok(Object::Reference(id)) => Some(*id),
+                _ => None,
+            }
+        };
+
+        let resources_id = if let Some(id) = resources_ref {
+            id
+        } else {
+            // Ensure inline Resources dict exists on the page
+            if let Some(Object::Dictionary(page_dict)) = doc.objects.get_mut(&page_id) {
+                if page_dict.get(b"Resources").is_err() {
+                    page_dict.set("Resources", Object::Dictionary(lopdf::Dictionary::new()));
+                }
+            }
+            // Convert inline Resources to an indirect object for easier manipulation
+            let res_dict = if let Some(Object::Dictionary(page_dict)) = doc.objects.get_mut(&page_id) {
+                if let Ok(Object::Dictionary(d)) = page_dict.get(b"Resources") {
+                    d.clone()
+                } else {
+                    lopdf::Dictionary::new()
+                }
+            } else {
+                lopdf::Dictionary::new()
+            };
+            let id = doc.add_object(Object::Dictionary(res_dict));
+            if let Some(Object::Dictionary(page_dict)) = doc.objects.get_mut(&page_id) {
+                page_dict.set("Resources", Object::Reference(id));
+            }
+            id
+        };
+
+        // Step 2: find the XObject sub-dict (may also be indirect)
+        let xobject_ref = {
+            if let Some(Object::Dictionary(resources)) = doc.objects.get(&resources_id) {
+                match resources.get(b"XObject") {
+                    Ok(Object::Reference(id)) => Some(*id),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        };
+
+        if let Some(xobj_id) = xobject_ref {
+            // XObject dict is indirect — modify it directly
+            if let Some(Object::Dictionary(xobjects)) = doc.objects.get_mut(&xobj_id) {
+                xobjects.set(name, Object::Reference(xobject_id));
+            }
+        } else {
+            // XObject is inline or missing — modify the Resources dict
+            if let Some(Object::Dictionary(resources)) = doc.objects.get_mut(&resources_id) {
+                if resources.get(b"XObject").is_err() {
+                    resources.set("XObject", Object::Dictionary(lopdf::Dictionary::new()));
+                }
+                if let Ok(Object::Dictionary(xobjects)) = resources.get_mut(b"XObject") {
+                    xobjects.set(name, Object::Reference(xobject_id));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
