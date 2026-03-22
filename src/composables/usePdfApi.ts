@@ -55,6 +55,10 @@ export function usePdfApi() {
     return invoke<void>("sign_pdf", { request });
   }
 
+  async function deleteFile(path: string): Promise<void> {
+    return invoke<void>("delete_file", { path });
+  }
+
   return {
     getPdfInfo,
     getPdfData,
@@ -65,5 +69,6 @@ export function usePdfApi() {
     reorderPages,
     signPdf,
     saveFileBase64,
+    deleteFile,
   };
 }

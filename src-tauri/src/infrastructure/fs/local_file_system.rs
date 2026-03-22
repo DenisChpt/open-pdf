@@ -45,4 +45,13 @@ impl FileSystemPort for LocalFileSystem {
                 reason: format!("{}: {}", path.display(), e),
             })
     }
+
+    fn delete_file(&self, path: &Path) -> Result<(), DomainError> {
+        if path.exists() {
+            fs::remove_file(path).map_err(|e| DomainError::FileWriteError {
+                reason: format!("Failed to delete '{}': {}", path.display(), e),
+            })?;
+        }
+        Ok(())
+    }
 }
